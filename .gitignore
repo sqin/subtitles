@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Database
+*.db
+
+# Temporary audio files
+backend/temp_audio/
+/audio/
+/data/
+*.mp3
+*.mkv
+!audio/**/*.mp3
+
+# Temporary video files
+backend/temp_video/
+*.mp4
+!video/**/*.mp4
+
+# Node
+node_modules/
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+/tmp/
+
