@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    container_name: sheldon-backend
+    restart: unless-stopped
+    ports:
+      - "18000:18000"
+    volumes:
+      - ./data:/app/data:ro
+      - ./audio:/app/audio:ro
+      - ./video:/app/video:ro
+      - backend_temp_audio:/app/temp_audio
+      - backend_temp_video:/app/temp_video
+
+  frontend:
+    build: ./frontend
+    container_name: sheldon-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "13000:13000"
+
+volumes:
+  backend_temp_audio:
+  backend_temp_video:
+
+

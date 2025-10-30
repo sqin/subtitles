@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+build/
+dist/
+*.egg-info/
+.git/
+.gitignore
+subtitle_index.db
+temp_audio/
+temp_video/
+
+

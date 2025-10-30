@@ -53,6 +53,9 @@ const results = ref([])
 const loading = ref(false)
 const stats = ref({ total_files: 0, total_dialogues: 0 })
 
+const API_BASE = `${location.protocol}//${location.hostname}:18000`
+const api = axios.create({ baseURL: API_BASE })
+
 const performSearch = async () => {
   if (!query.value.trim()) {
     results.value = []
@@ -61,7 +64,7 @@ const performSearch = async () => {
   
   loading.value = true
   try {
-    const response = await axios.get(`/api/search`, {
+    const response = await api.get(`/search`, {
       params: { q: query.value }
     })
     results.value = response.data.results
@@ -75,7 +78,7 @@ const performSearch = async () => {
 
 const loadStats = async () => {
   try {
-    const response = await axios.get('/api/stats')
+    const response = await api.get('/stats')
     stats.value = response.data
   } catch (error) {
     console.error('加载统计信息失败:', error)
