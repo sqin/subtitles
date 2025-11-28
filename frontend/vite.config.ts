@@ -14,16 +14,16 @@ export default defineConfig({
     ],
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:6000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '')
       },
       '/temp_audio': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:6000',
         changeOrigin: true
       },
       '/temp_video': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:6000',
         changeOrigin: true
       }
     }

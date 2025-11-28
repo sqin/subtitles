@@ -115,13 +115,10 @@ const escapeRegExp = (str: string): string => {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-const API_BASE = `${location.protocol}//${location.hostname}:18000`
-const api = axios.create({ baseURL: API_BASE })
-
 const generateAudio = async () => {
   generating.value = true
   try {
-    const response = await api.post('/generate_audio', {
+    const response = await axios.post('/api/generate_audio', {
       season: props.result.season,
       episode: props.result.episode,
       start_time: props.result.start_time,
@@ -144,7 +141,7 @@ const generateAudio = async () => {
 const generateVideo = async () => {
   generatingVideo.value = true
   try {
-    const response = await api.post('/generate_video', {
+    const response = await axios.post('/api/generate_video', {
       season: props.result.season,
       episode: props.result.episode,
       start_time: props.result.start_time,

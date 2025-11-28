@@ -82,6 +82,26 @@ class VideoClipResponse(BaseModel):
     message: Optional[str] = None
 
 
+class VideoClipItem(BaseModel):
+    """视频片段项"""
+    season: int
+    episode: int
+    start_time: str
+    end_time: str
+
+
+class MergeVideosRequest(BaseModel):
+    """合并视频请求数据模型"""
+    clips: List[VideoClipItem]
+
+
+class MergeVideosResponse(BaseModel):
+    """合并视频响应数据模型"""
+    success: bool
+    video_url: Optional[str] = None
+    message: Optional[str] = None
+
+
 @app.get("/")
 async def root():
     """根路径"""
@@ -212,6 +232,52 @@ async def generate_video(request: VideoClipRequest):
         raise HTTPException(status_code=500, detail=f"生成视频失败: {str(e)}")
 
 
+@app.post("/merge_videos", response_model=MergeVideosResponse)
+async def merge_videos(request: MergeVideosRequest):
+    """
+    合并多个视频片段成一个视频文件
+    
+    Args:
+        request: 合并视频请求，包含多个视频片段信息
+        
+    Returns:
+        合并后的视频文件 URL
+    """
+    from video_processor import merge_video_clips, cleanup_old_files
+    
+    try:
+        # 清理旧文件
+        cleanup_old_files()
+        
+        # 转换请求数据格式
+        clips_data = [
+            {
+                'season': clip.season,
+                'episode': clip.episode,
+                'start_time': clip.start_time,
+                'end_time': clip.end_time
+            }
+            for clip in request.clips
+        ]
+        
+        # 合并视频
+        video_path = merge_video_clips(clips_data)
+        
+        if video_path:
+            return MergeVideosResponse(
+                success=True,
+                video_url=f"/{video_path}"
+            )
+        else:
+            return MergeVideosResponse(
+                success=False,
+                message="合并视频失败，请检查视频文件是否存在"
+            )
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"合并视频失败: {str(e)}")
+
+
 if __name__ == '__main__':
-    uvicorn.run(app, host="0.0.0.0", port=18000)
+    uvicorn.run(app, host="0.0.0.0", port=6000)
 
