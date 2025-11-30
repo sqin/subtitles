@@ -39,4 +39,6 @@ node_modules/
 # Logs
 *.log
 /tmp/
+logs/
+*.pid
 

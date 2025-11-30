@@ -125,7 +125,7 @@ def time_to_seconds(time_str: str) -> float:
     return total_seconds
 
 
-def limit_file_count(max_files: int = 10):
+def limit_file_count(max_files: int = 5000):
     """限制临时文件数量，保留最新的文件"""
     temp_dir = ensure_temp_dir()
     if not temp_dir.exists():
@@ -158,12 +158,14 @@ def extract_video_clip(
     """
     从视频文件中截取片段
     
+    注意：开始时间会自动往前移动5秒，结束时间会自动往后延长2秒
+    
     Args:
         season: 季数
         episode: 集数
-        start_time: 开始时间戳，如 "0:18:38.72"
-        end_time: 结束时间戳，如 "0:18:40.48"
-        padding: 前后额外添加的秒数，默认2秒
+        start_time: 开始时间戳，如 "0:18:38.72"（会自动往前移5秒）
+        end_time: 结束时间戳，如 "0:18:40.48"（会自动往后延长2秒）
+        padding: 此参数已废弃，不再使用
         
     Returns:
         生成的视频文件路径（相对于静态目录），失败返回 None
@@ -178,9 +180,11 @@ def extract_video_clip(
     start_seconds = time_to_seconds(start_time)
     end_seconds = time_to_seconds(end_time)
     
-    # 添加前后缓冲时间
-    start_seconds = max(0, start_seconds - padding)
-    end_seconds = end_seconds + padding
+    # 开始时间往前移动5秒（例如：11:04 -> 10:59）
+    start_seconds = max(0, start_seconds - 5.0)
+    
+    # 结束时间往后延长3秒
+    end_seconds = end_seconds + 3.0
     
     # 计算持续时间
     duration = end_seconds - start_seconds
@@ -233,7 +237,7 @@ def extract_video_clip(
         
         if result.returncode == 0 and output_path.exists():
             # 限制文件数量
-            limit_file_count(max_files=10)
+            limit_file_count(max_files=1000)
             # 返回相对于静态目录的路径
             return f'temp_video/{output_filename}'
         else:
@@ -249,26 +253,76 @@ def extract_video_clip(
         return None
 
 
+def get_video_duration(video_path: Path) -> Optional[float]:
+    """
+    使用 ffprobe 获取视频文件的时长（秒）
+
+    Args:
+        video_path: 视频文件路径
+
+    Returns:
+        视频时长（秒），失败返回 None
+    """
+    try:
+        cmd = [
+            'ffprobe',
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_format',
+            '-show_streams',
+            str(video_path)
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode == 0:
+            import json
+            data = json.loads(result.stdout)
+
+            # 优先使用 format.duration
+            if 'format' in data and 'duration' in data['format']:
+                return float(data['format']['duration'])
+
+            # 如果没有 format.duration，尝试从视频流获取
+            for stream in data.get('streams', []):
+                if stream.get('codec_type') == 'video' and 'duration' in stream:
+                    return float(stream['duration'])
+
+        return None
+
+    except subprocess.TimeoutExpired:
+        print(f"ffprobe 超时: {video_path}")
+        return None
+    except Exception as e:
+        print(f"获取视频时长失败 {video_path}: {e}")
+        return None
+
+
 def cleanup_old_files():
     """清理旧的临时文件"""
     temp_dir = ensure_temp_dir()
     if not temp_dir.exists():
         return
-    
+
     cutoff_time = datetime.now() - timedelta(hours=CLEANUP_AFTER_HOURS)
     deleted_count = 0
-    
+
     for file_path in temp_dir.glob('*.mp4'):
         # 获取文件修改时间
         file_time = datetime.fromtimestamp(file_path.stat().st_mtime)
-        
+
         if file_time < cutoff_time:
             try:
                 file_path.unlink()
                 deleted_count += 1
             except Exception as e:
                 print(f"删除文件失败 {file_path}: {e}")
-    
+
     if deleted_count > 0:
         print(f"清理了 {deleted_count} 个旧视频文件")
 
@@ -283,7 +337,7 @@ def merge_video_clips(clips: List[Dict[str, any]], padding: float = 2.0) -> Opti
             - episode: 集数
             - start_time: 开始时间戳，如 "0:18:38.72"
             - end_time: 结束时间戳，如 "0:18:40.48"
-        padding: 前后额外添加的秒数，默认2秒
+        padding: 此参数已废弃，不再使用（保留以兼容旧代码）
         
     Returns:
         合并后的视频文件路径（相对于静态目录），失败返回 None
@@ -340,56 +394,191 @@ def merge_video_clips(clips: List[Dict[str, any]], padding: float = 2.0) -> Opti
         for failed in failed_clips:
             print(f"  - {failed}")
     
-    # 第二步：使用 filter_complex 方法合并视频（更可靠）
+    # 第二步：获取每个视频的时长并准备转场
+    print(f"\n开始获取 {len(clip_files)} 个视频片段的时长信息...")
+
+    # 获取每个视频的时长
+    clip_durations = []
+    for i, clip_file in enumerate(clip_files):
+        duration = get_video_duration(clip_file)
+        if duration is None:
+            print(f"警告: 无法获取视频时长 {clip_file.name}，使用默认值 10 秒")
+            duration = 10.0  # 默认时长
+        clip_durations.append(duration)
+        print(f"  片段 {i+1}: {duration:.2f} 秒")
+
+    # 第三步：构建转场效果的合并命令
     output_filename = f'merged_{timestamp}.mp4'
     output_path = temp_dir / output_filename
-    
-    print(f"\n开始合并 {len(clip_files)} 个视频片段...")
-    
+
+    print(f"\n开始合并 {len(clip_files)} 个视频片段（带转场效果）...")
+
     # 根据片段数量动态调整超时时间
-    # 每个片段大约需要5-10秒处理时间
-    merge_timeout = max(600, len(clip_files) * 10 + 120)  # 最少10分钟
-    
+    # 转场处理需要更多时间
+    merge_timeout = max(600, len(clip_files) * 15 + 120)  # 最少10分钟
+
     try:
         # 构建输入参数
         input_args = []
         for clip_file in clip_files:
             input_args.extend(['-i', str(clip_file)])
-        
-        # 构建 filter_complex：将所有输入的视频和音频流分别连接
-        # [0:v][1:v][2:v]...concat=n=N:v=1:a=0[v]  # 连接视频流
-        # [0:a][1:a][2:a]...concat=n=N:v=0:a=1[a]  # 连接音频流
-        video_inputs = ''.join([f'[{i}:v]' for i in range(len(clip_files))])
-        audio_inputs = ''.join([f'[{i}:a]' for i in range(len(clip_files))])
-        
-        filter_complex = (
-            f'{video_inputs}concat=n={len(clip_files)}:v=1:a=0[v];'
-            f'{audio_inputs}concat=n={len(clip_files)}:v=0:a=1[a]'
-        )
-        
-        cmd = [
-            'ffmpeg',
-            *input_args,
-            '-filter_complex', filter_complex,
-            '-map', '[v]',  # 映射视频流
-            '-map', '[a]',  # 映射音频流
-            # 视频编码设置
-            '-c:v', 'libx264',
-            '-profile:v', 'baseline',
-            '-level', '3.0',
-            '-preset', 'medium',
-            '-crf', '23',
-            '-pix_fmt', 'yuv420p',
-            # 音频编码设置
-            '-c:a', 'aac',
-            '-ar', '48000',
-            '-b:a', '192k',
-            '-ac', '2',
-            # 其他设置
-            '-movflags', '+faststart',
-            '-y',
-            str(output_path)
-        ]
+
+        # 转场持续时间（秒）
+        transition_duration = 1.0
+
+        # 如果只有一个视频，不需要转场，直接使用原来的 concat 方法
+        if len(clip_files) == 1:
+            # 构建 filter_complex：将所有输入的视频和音频流分别连接
+            video_inputs = ''.join([f'[{i}:v]' for i in range(len(clip_files))])
+            audio_inputs = ''.join([f'[{i}:a]' for i in range(len(clip_files))])
+
+            filter_complex = (
+                f'{video_inputs}concat=n={len(clip_files)}:v=1:a=0[v];'
+                f'{audio_inputs}concat=n={len(clip_files)}:v=0:a=1[a]'
+            )
+
+            cmd = [
+                'ffmpeg',
+                *input_args,
+                '-filter_complex', filter_complex,
+                '-map', '[v]',  # 映射视频流
+                '-map', '[a]',  # 映射音频流
+                # 视频编码设置
+                '-c:v', 'libx264',
+                '-profile:v', 'baseline',
+                '-level', '3.0',
+                '-preset', 'medium',
+                '-crf', '23',
+                '-pix_fmt', 'yuv420p',
+                # 音频编码设置
+                '-c:a', 'aac',
+                '-ar', '48000',
+                '-b:a', '192k',
+                '-ac', '2',
+                # 其他设置
+                '-movflags', '+faststart',
+                '-y',
+                str(output_path)
+            ]
+        else:
+            # 多个视频时使用转场效果
+            # 检查是否有视频太短，无法应用完整转场
+            min_duration_for_transition = transition_duration + 1.0
+            short_clips = [i for i, duration in enumerate(clip_durations) if duration < min_duration_for_transition]
+
+            if short_clips:
+                print(f"警告: 发现 {len(short_clips)} 个视频片段时长太短，无法应用完整转场效果")
+                print(f"短视频片段索引: {short_clips}")
+
+                # 如果所有视频都太短，退回到无转场模式
+                if len(short_clips) == len(clip_durations):
+                    print("所有视频片段都太短，将使用无转场合并")
+                    video_inputs = ''.join([f'[{i}:v]' for i in range(len(clip_files))])
+                    audio_inputs = ''.join([f'[{i}:a]' for i in range(len(clip_files))])
+                    filter_complex = (
+                        f'{video_inputs}concat=n={len(clip_files)}:v=1:a=0[v];'
+                        f'{audio_inputs}concat=n={len(clip_files)}:v=0:a=1[a]'
+                    )
+                    
+                    cmd = [
+                        'ffmpeg',
+                        *input_args,
+                        '-filter_complex', filter_complex,
+                        '-map', '[v]',
+                        '-map', '[a]',
+                        '-c:v', 'libx264',
+                        '-profile:v', 'baseline',
+                        '-level', '3.0',
+                        '-preset', 'medium',
+                        '-crf', '23',
+                        '-pix_fmt', 'yuv420p',
+                        '-c:a', 'aac',
+                        '-ar', '48000',
+                        '-b:a', '192k',
+                        '-ac', '2',
+                        '-movflags', '+faststart',
+                        '-y',
+                        str(output_path)
+                    ]
+                else:
+                    # 部分视频短，使用调整后的转场时间
+                    adjusted_transition = min(transition_duration, min(d for d in clip_durations if d >= min_duration_for_transition) - 0.5)
+                    print(f"调整转场持续时间为: {adjusted_transition:.2f} 秒")
+                    transition_duration = adjusted_transition
+                    # 继续执行转场逻辑
+                    short_clips = []  # 清空，继续使用转场
+
+            # 构建转场效果的 filter_complex（如果所有视频都有足够时长，或部分视频短但已调整转场时间）
+            if not short_clips or len(short_clips) != len(clip_durations):
+                # 首先标准化所有输入视频的帧率和时间基准
+                normalized_video_labels = []
+                normalized_audio_labels = []
+                filter_parts = []
+                
+                for i in range(len(clip_files)):
+                    # 标准化视频：统一帧率为 30fps，重置时间基准
+                    normalized_video_labels.append(f'[v{i}_norm]')
+                    filter_parts.append(f'[{i}:v]fps=30,setpts=PTS-STARTPTS{normalized_video_labels[i]};')
+                    # 标准化音频：重置时间基准
+                    normalized_audio_labels.append(f'[a{i}_norm]')
+                    filter_parts.append(f'[{i}:a]asetpts=PTS-STARTPTS{normalized_audio_labels[i]};')
+                
+                # 为每个转场构建 filter
+                # xfade 的 offset 是相对于第一个输入视频的时间点
+                for i in range(len(clip_files) - 1):
+                    if i == 0:
+                        # 第一个转场：offset 是第一个视频的结束时间减去转场持续时间
+                        transition_offset = clip_durations[0] - transition_duration
+                        transition_offset = max(0.1, transition_offset)
+                        
+                        filter_parts.append(f'{normalized_video_labels[0]}{normalized_video_labels[1]}xfade=transition=fade:duration={transition_duration}:offset={transition_offset:.3f}[v01];')
+                        if i < len(clip_files) - 2:
+                            filter_parts.append(f'{normalized_audio_labels[0]}{normalized_audio_labels[1]}acrossfade=d={transition_duration}:c1=tri:c2=tri[a01];')
+                        else:
+                            filter_parts.append(f'{normalized_audio_labels[0]}{normalized_audio_labels[1]}acrossfade=d={transition_duration}:c1=tri:c2=tri[a01]')
+                    else:
+                        # 后续转场：计算前一个 xfade 输出的长度
+                        # 前一个 xfade 输出的长度 = 前面所有视频的总长度 - (i * transition_duration)
+                        prev_total_length = sum(clip_durations[:i+1]) - (i * transition_duration)
+                        transition_offset = prev_total_length - transition_duration
+                        transition_offset = max(0.1, transition_offset)
+                        
+                        prev_v = f'v{i:02d}'
+                        prev_a = f'a{i:02d}'
+                        filter_parts.append(f'[{prev_v}]{normalized_video_labels[i+1]}xfade=transition=fade:duration={transition_duration}:offset={transition_offset:.3f}[v{i+1:02d}];')
+                        if i < len(clip_files) - 2:
+                            filter_parts.append(f'[{prev_a}]{normalized_audio_labels[i+1]}acrossfade=d={transition_duration}:c1=tri:c2=tri[a{i+1:02d}];')
+                        else:
+                            filter_parts.append(f'[{prev_a}]{normalized_audio_labels[i+1]}acrossfade=d={transition_duration}:c1=tri:c2=tri[a{i+1:02d}]')
+
+                # 构建完整的 filter_complex
+                filter_complex = ''.join(filter_parts)
+
+                # 确定最终输出流的标签
+                last_idx = len(clip_files) - 1
+                video_output = f'[v{last_idx:02d}]'
+                audio_output = f'[a{last_idx:02d}]'
+
+                cmd = [
+                    'ffmpeg',
+                    *input_args,
+                    '-filter_complex', filter_complex,
+                    '-map', video_output,
+                    '-map', audio_output,
+                    '-c:v', 'libx264',
+                    '-profile:v', 'baseline',
+                    '-level', '3.0',
+                    '-preset', 'medium',
+                    '-crf', '23',
+                    '-pix_fmt', 'yuv420p',
+                    '-c:a', 'aac',
+                    '-ar', '48000',
+                    '-b:a', '192k',
+                    '-ac', '2',
+                    '-movflags', '+faststart',
+                    '-y',
+                    str(output_path)
+                ]
         
         result = subprocess.run(
             cmd,
@@ -401,8 +590,35 @@ def merge_video_clips(clips: List[Dict[str, any]], padding: float = 2.0) -> Opti
         if result.returncode == 0 and output_path.exists():
             file_size_mb = output_path.stat().st_size / (1024 * 1024)
             print(f"✓ 视频合并成功！文件大小: {file_size_mb:.2f} MB")
+            
+            # 删除临时片段文件
+            print(f"\n开始删除 {len(clip_files)} 个临时片段文件...")
+            deleted_count = 0
+            failed_deletes = []
+            
+            for clip_file in clip_files:
+                try:
+                    if clip_file.exists():
+                        file_size = clip_file.stat().st_size / (1024 * 1024)
+                        clip_file.unlink()
+                        deleted_count += 1
+                        print(f"  ✓ 已删除: {clip_file.name} ({file_size:.2f} MB)")
+                    else:
+                        print(f"  - 文件不存在（可能已删除）: {clip_file.name}")
+                except Exception as e:
+                    error_msg = f"删除失败 {clip_file.name}: {e}"
+                    print(f"  ✗ {error_msg}")
+                    failed_deletes.append(error_msg)
+            
+            if deleted_count > 0:
+                print(f"\n✓ 成功删除 {deleted_count} 个临时片段文件")
+            if failed_deletes:
+                print(f"\n警告: {len(failed_deletes)} 个文件删除失败:")
+                for error in failed_deletes:
+                    print(f"  - {error}")
+            
             # 限制文件数量
-            limit_file_count(max_files=10)
+            limit_file_count(max_files=1000)
             # 返回相对于静态目录的路径
             return f'temp_video/{output_filename}'
         else:

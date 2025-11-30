@@ -9,26 +9,36 @@
 - 🎬 **详细信息**：显示匹配对白的季数、集数、时间段
 - 📝 **上下文显示**：显示前后各一条对白，方便理解语境
 - 🎨 **现代化 UI**：Vue 3 + TypeScript 构建的响应式界面
+- 🎵 **音频片段**：支持生成音频片段
+- 🎥 **视频片段**：支持生成和合并视频片段
+- 🚀 **后台运行**：提供便捷的启动/停止脚本，支持后台运行
 
 ## 项目结构
 
 ```
 sheldon/
-├── data/                    # 141个字幕文件
-├── backend/
+├── data/                    # 字幕文件目录
+├── audio/                   # 音频文件目录
+├── video/                   # 视频文件目录
+├── backend/                 # 后端服务
 │   ├── parser.py           # 字幕解析器
 │   ├── indexer.py          # SQLite 索引构建器
 │   ├── main.py             # FastAPI 后端
-│   └── requirements.txt    # Python依赖
-├── frontend/
+│   ├── audio_processor.py  # 音频处理模块
+│   ├── video_processor.py  # 视频处理模块
+│   └── pyproject.toml      # 项目配置（uv）
+├── frontend/                # 前端应用
 │   ├── src/
 │   │   ├── App.vue         # 主应用组件
 │   │   ├── components/
-│   │   │   └── ResultItem.vue另一方面  # 结果展示组件
+│   │   │   └── ResultItem.vue  # 结果展示组件
 │   │   ├── main.ts
 │   │   └── style.css
 │   ├── package.json
 │   └── vite.config.ts
+├── logs/                    # 日志文件目录（自动创建）
+├── start.sh                 # 启动脚本（后台运行）
+├── stop.sh                  # 停止脚本
 └── README.md
 ```
 
@@ -40,7 +50,7 @@ sheldon/
 
 ```bash
 cd backend
-python indexer.py
+uv run python indexer.py
 ```
 
 这会：
@@ -48,25 +58,50 @@ python indexer.py
 - 提取季集信息和对话内容
 - 构建 SQLite 数据库索引
 
-### 2. 启动后端服务
+### 2. 后台启动所有服务
+
+项目提供了便捷的启动脚本，可以在后台同时启动前后端服务：
 
 ```bash
-cd backend
-pip install -r requirements.txt
-python main.py
+# 在项目根目录执行
+./start.sh
 ```
 
-后端将在 `http://localhost:8000` 启动
+这会在后台启动：
+- 后端服务：`http://localhost:6000`
+- 前端服务：`http://localhost:5173`
 
-### 求解 3. 启动前端服务
+日志文件保存在 `logs/` 目录：
+- `logs/backend.log` - 后端日志
+- `logs/frontend.log` - 前端日志
 
+**查看实时日志：**
+```bash
+tail -f logs/backend.log    # 后端日志
+tail -f logs/frontend.log   # 前端日志
+```
+
+**停止所有服务：**
+```bash
+./stop.sh
+```
+
+### 3. 手动启动（可选）
+
+如果需要单独启动或前台运行：
+
+**启动后端：**
+```bash
+cd backend
+uv run python main.py
+```
+
+**启动前端：**
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-
-前端将在 `http://localhost:5173` 启动
 
 ### 4. 使用系统
 
